@@ -1,0 +1,22 @@
+{
+  "name": "vnot devconatiner",
+  "updateRemoteUserUID": false,
+  "containerUser": "develop",
+  "remoteUser": "develop",
+  "overrideCommand": false,
+  "postCreateCommand": "npm ci",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "USERNAME": "develop",
+      "USER_UID": "1000"
+    }
+  },
+  "runArgs": [
+    "--init",
+    "--privileged"
+  ],
+  "mounts": [
+    "target=/var/lib/docker,source=vnot_docker,type=volume"
+  ]
+}
