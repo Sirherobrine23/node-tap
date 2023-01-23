@@ -7,7 +7,7 @@
 			"includePath": [
 				"${workspaceFolder}/node_modules/node-addon-api/**",
 				"${workspaceFolder}/node_modules/node-api-headers/include/**",
-				"${workspaceFolder}/src/TAP/**"
+				"${workspaceFolder}/src/TUN/**"
 			],
 			"defines": [
 				"_DEBUG",
@@ -20,7 +20,7 @@
 			"includePath": [
 				"${workspaceFolder}/node_modules/node-addon-api/**",
 				"${workspaceFolder}/node_modules/node-api-headers/include/**",
-				"${workspaceFolder}/src/TAP/**"
+				"${workspaceFolder}/src/TUN/**"
 			],
 			"defines": [],
 			"compilerPath": "/usr/bin/clang",
