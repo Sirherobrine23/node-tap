@@ -1,0 +1,3 @@
+[submodule "src/dep/win/wintun"]
+	path = src/dep/win/wintun
+	url = https://github.com/WireGuard/wintun.git

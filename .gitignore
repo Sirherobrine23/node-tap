@@ -1,7 +1,9 @@
-node_modules/
+# System
 **/.DS_Store
-*.d.ts
-*.js
+
+# Node
+node_modules/
 
 # TAP Build
 /build/
+/*.dll

@@ -11,7 +11,7 @@
       "includePath": [
         "C:/Users/${env:username}/AppData/Local/node-gyp/Cache/18.16.0/include/node",
         "${workspaceFolder}/node_modules/node-addon-api",
-        "${workspaceFolder}/src/dep/include",
+        "${workspaceFolder}/src/dep/win/wintun/api",
         "${workspaceFolder}/src"
       ]
     },

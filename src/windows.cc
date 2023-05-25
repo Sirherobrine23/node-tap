@@ -10,14 +10,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <thread>
 #include "stream/node_stream.cc"
-
 extern "C" {
   #include <wintun.h>
 }
 
 Napi::Value createInterface(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
+  Napi::String interfaceName = info[0].As<Napi::String>();
+  if (interfaceName.IsUndefined()) interfaceName = Napi::String::New(env, "tapinterface");
+
   static WINTUN_CREATE_ADAPTER_FUNC *WintunCreateAdapter;
   static WINTUN_CLOSE_ADAPTER_FUNC *WintunCloseAdapter;
   static WINTUN_OPEN_ADAPTER_FUNC *WintunOpenAdapter;
@@ -58,7 +61,7 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
   }
 
   GUID ExampleGuid = { 0xdeadbabe, 0xcafe, 0xbeef, { 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef } };
-  WINTUN_ADAPTER_HANDLE Adapter = WintunCreateAdapter(L"Demo", L"Example", &ExampleGuid);
+  WINTUN_ADAPTER_HANDLE Adapter = WintunCreateAdapter((LPCWSTR)interfaceName.Utf8Value().c_str(), L"Wintun", &ExampleGuid);
   if (!Adapter) {
     Napi::Error::New(env, "Failed to create adapter").ThrowAsJavaScriptException();
     return env.Undefined();

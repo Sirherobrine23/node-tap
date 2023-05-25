@@ -5,9 +5,7 @@
     ],
     "defines": [
       "NAPI_DISABLE_CPP_EXCEPTIONS"
-    ],
-    "cflags": [],
-    "cflags_cc": [],
+    ]
   },
   "targets": [
     {
@@ -18,8 +16,7 @@
       "conditions": [
         ["OS=='win'", {
           "include_dirs": [
-            "src/dep/include",
-            "<!(node windll.cjs)"
+            "src/dep/win/wintun/api"
           ]
         }]
       ]
