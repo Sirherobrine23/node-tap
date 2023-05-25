@@ -4,11 +4,12 @@
   "description": "Network baypass",
   "main": "src/index.js",
   "type": "module",
+  "author": "Matheus Sampaio Queiroga <srherobrine20@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/Sirherobrine23/vnot#readme",
   "scripts": {
-    "build:js": "tsc --build --clean && tsc",
-    "build": "cmake-js build",
-    "prepack": "npm run build",
-    "install": "cmake-js compile"
+    "build": "node-gyp rebuild",
+    "prepack": "npm run build"
   },
   "repository": {
     "type": "git",
@@ -16,22 +17,15 @@
   },
   "keywords": [
     "Network",
-    "HTTP",
-    "Injection"
+    "TUN/TAP",
+    "TUN",
+    "TAP"
   ],
-  "author": "Matheus Sampaio Queiroga <srherobrine20@gmail.com>",
-  "license": "MIT",
   "bugs": {
     "url": "https://github.com/Sirherobrine23/vnot/issues"
   },
-  "homepage": "https://github.com/Sirherobrine23/vnot#readme",
-  "devDependencies": {
-    "@types/node": "^18.11.18",
-    "ts-node": "^10.9.1"
-  },
   "dependencies": {
-    "cmake-js": "^7.1.1",
     "node-addon-api": "^5.0.0",
-    "typescript": "^4.9.4"
+    "node-gyp": "^9.3.1"
   }
 }
