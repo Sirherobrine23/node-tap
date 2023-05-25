@@ -17,7 +17,6 @@
     },
     {
       "name": "Linux",
-      "compilerPath": "/usr/bin/clang",
       "cStandard": "c17",
       "cppStandard": "c++17",
       "intelliSenseMode": "linux-clang-x64",
@@ -31,8 +30,7 @@
         "${workspaceFolder}/node_modules/node-addon-api/**",
         "${workspaceFolder}/node_modules/**",
         "${workspaceFolder}/**",
-        "/usr/include/node",
-        "${workspaceFolder}/src/addon"
+        "/usr/include/node"
       ]
     }
   ],

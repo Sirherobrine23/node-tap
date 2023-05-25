@@ -102,3 +102,10 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
 
   return stream.getStream();
 }
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  exports.Set("createInterface", Napi::Function::New(env, createInterface));
+  return exports;
+}
+
+NODE_API_MODULE(addon, Init);
