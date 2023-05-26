@@ -1,8 +1,6 @@
 const stream = require("stream");
 const tap = require("./build/Release/tap.node");
 const path = require("path");
-var SegfaultHandler = require("segfault-handler");
-SegfaultHandler.registerHandler("crash.log");
 
 module.exports.Tun = class Tun extends stream.Duplex {
   fd;
@@ -12,7 +10,10 @@ module.exports.Tun = class Tun extends stream.Duplex {
    */
   constructor(name, options) {
     super({});
-    this.fd = tap.createInterface(path.join(__dirname, "wintun.dll"), name, options);
+    this.fd = tap.createInterface(name, {
+      ...options,
+      dll: path.join(__dirname, "wintun.dll"),
+    });
   }
 
   _write(chuck, encoding, callback) {

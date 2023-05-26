@@ -46,11 +46,44 @@ static HMODULE InitializeWintun(LPCWSTR location = L"wintun.dll") {
   return Wintun;
 }
 
+void WriteSession(WINTUN_SESSION_HANDLE Session, const char* Buff, const int Size) {
+  BYTE* Packet = WintunAllocateSendPacket(Session, Size);
+  if (Packet) {
+    memcpy(Packet, Buff, Size);
+    WintunSendPacket(Session, Packet);
+  }
+}
+
+const char* ReadSession(WINTUN_SESSION_HANDLE Session, char* Buff) {
+  for (;;) {
+    DWORD PacketSize;
+    BYTE* Packet = WintunReceivePacket(Session, &PacketSize);
+    if (Packet) {
+      std::cerr << "Get buffer" << std::endl;
+      memcpy(Buff, Packet, PacketSize);
+      WintunReleaseReceivePacket(Session, Packet);
+      return nullptr;
+    } else if (GetLastError() == ERROR_NO_MORE_ITEMS) {
+      WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
+    } else {
+      DWORD LastError = GetLastError();
+      std::string err = std::to_string(LastError);
+      std::string msgErr = "Packet read failed, Error code: ";
+      return msgErr.append(err).c_str();
+    }
+  }
+}
+
+void closeSession(WINTUN_ADAPTER_HANDLE Adapter) {
+  WintunCloseAdapter(Adapter);
+}
+
 Napi::Value createInterface(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
-  Napi::String dllLocation = info[0].ToString();
-  Napi::String interfaceName = info[1].ToString();
-  if (interfaceName.IsUndefined()) interfaceName = Napi::String::New(env, "tapinterface");
+  Napi::String interfaceName = info[0].As<Napi::String>();
+  if (interfaceName.IsUndefined()) interfaceName = Napi::String::New(env, "nodetun");
+  Napi::Object options = info[1].ToObject();
+  Napi::String dllLocation = options.Get("dll").ToString();
 
   HMODULE Wintun = InitializeWintun((LPCWSTR)dllLocation.Utf16Value().c_str());
   if (!Wintun) {
@@ -97,30 +130,23 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
 
   funcs.Set("deleteInterface", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) -> Napi::Value {
     const Napi::Env env = info.Env();
-    WintunCloseAdapter(Adapter);
+    try {
+      closeSession(Adapter);
+    } catch (const std::string& e) {
+      Napi::Error::New(env, e.c_str()).ThrowAsJavaScriptException();
+    }
     return env.Undefined();
   }));
 
   funcs.Set("Read", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) -> Napi::Value {
     const Napi::Env env = info.Env();
-    for (;;) {
-      DWORD PacketSize;
-      BYTE* Packet = WintunReceivePacket(Session, &PacketSize);
-      if (Packet) {
-        // PrintPacket(Packet, PacketSize);
-        std::cerr << "Get buffer" << std::endl;
-        const Napi::Buffer<unsigned char> Buff = Napi::Buffer<unsigned char>::New(env, Packet, (int)PacketSize);
-        WintunReleaseReceivePacket(Session, Packet);
-        return Buff;
-      } else if (GetLastError() == ERROR_NO_MORE_ITEMS) {
-        WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
-      } else {
-        DWORD LastError = GetLastError();
-        std::string err = std::to_string(LastError);
-        std::string msgErr = "Packet read failed, Error code: ";
-        Napi::Error::New(env, msgErr.append(err).c_str()).ThrowAsJavaScriptException();
-        return env.Undefined();
-      }
+    try {
+      char* Buff = {};
+      const char* res = ReadSession(Session, Buff);
+      if (!res) return Napi::Buffer<char>::New(env, Buff, sizeof(Buff));
+      Napi::Error::New(env, res).ThrowAsJavaScriptException();
+    } catch (const std::string& e) {
+      Napi::Error::New(env, e.c_str()).ThrowAsJavaScriptException();
     }
     return env.Undefined();
   }));
@@ -128,13 +154,7 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
   funcs.Set("Write", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) {
     const Napi::Env env = info.Env();
     const Napi::Buffer<char> chuck = info[0].As<Napi::Buffer<char>>();
-
-    BYTE* Packet = WintunAllocateSendPacket(Session, chuck.ByteLength());
-    if (Packet) {
-      memcpy(Packet, chuck.Data(), chuck.ByteLength());
-      WintunSendPacket(Session, Packet);
-    }
-
+    WriteSession(Session, chuck.Data(), chuck.ByteLength());
     return env.Undefined();
   }));
 
