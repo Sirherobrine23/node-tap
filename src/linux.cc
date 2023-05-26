@@ -36,8 +36,8 @@ int tun_alloc(char* dev) {
 
 Napi::Value createInterface(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
-  const Napi::Object options = info[1].IsObject() ? info[1].ToObject() : Napi::Object::New(env);
   std::string dev = info[0].ToString().Utf8Value();
+  const Napi::Object options = info[1].IsObject() ? info[1].ToObject() : Napi::Object::New(env);
 
   if (options.Get("tap").IsUndefined()) options.Set("tap", Napi::Boolean::New(env, false));
 

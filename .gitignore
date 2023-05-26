@@ -8,3 +8,6 @@ node_modules/
 # TAP Build
 /build/
 /*.dll
+
+# Debug
+/*.log

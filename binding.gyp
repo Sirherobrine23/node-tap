@@ -17,6 +17,10 @@
           ],
           "sources": [
             "src/windows.cc"
+          ],
+          "libraries": [
+            "ws2_32.lib",
+            "iphlpapi.lib"
           ]
         }],
         ["OS=='linux'", {
