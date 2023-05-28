@@ -2,6 +2,13 @@ const stream = require("stream");
 const tap = require("./build/Release/tap.node");
 const path = require("path");
 
+module.exports.Addon = tap;
+
+module.exports.getSessions = getSessions;
+function getSessions() {
+  return Number(tap.getSessions());
+}
+
 module.exports.Tun = class Tun extends stream.Duplex {
   fd;
   /**
@@ -18,22 +25,31 @@ module.exports.Tun = class Tun extends stream.Duplex {
 
   _write(chuck, encoding, callback) {
     try {
-      this.fd.Write(Buffer.from(chuck, encoding));
+      tap.WriteSessionBuffer(this.fd, Buffer.from(chuck, encoding));
       callback();
     } catch (err) {
       callback(err);
     }
   }
 
-  _read(size, atemp = 0) {
+  _read(_size) {
     if (!this.fd) return;
-    if (atemp > 5) return;
     try {
-      const buf = this.fd.Read();
-      this.push(buf);
-      return buf;
+      tap.ReadSessionBuffer(this.fd, (err, buff) => {
+        if (err) return this.emit("error", err);
+        return this.push(buff);
+      });
     } catch (err) {
-      return this._read(size, ++atemp);
+      this.emit("error", err);
     }
+  }
+
+  _final() {
+    tap.closeAdapter(this.fd);
+  }
+
+  _destroy(err, callback) {
+    tap.closeAdapter(this.fd);
+    return callback(err);
   }
 }

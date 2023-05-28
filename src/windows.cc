@@ -1,4 +1,7 @@
 #include <napi.h>
+#include <iostream>
+#include <map>
+#include <thread>
 #include <winsock2.h>
 #include <Windows.h>
 #include <ws2ipdef.h>
@@ -10,7 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <combaseapi.h>
-#include <iostream>
 #include "wintun.h"
 
 static WINTUN_CREATE_ADAPTER_FUNC *WintunCreateAdapter;
@@ -46,38 +48,8 @@ static HMODULE InitializeWintun(LPCWSTR location = L"wintun.dll") {
   return Wintun;
 }
 
-void WriteSession(WINTUN_SESSION_HANDLE Session, const char* Buff, const int Size) {
-  BYTE* Packet = WintunAllocateSendPacket(Session, Size);
-  if (Packet) {
-    memcpy(Packet, Buff, Size);
-    WintunSendPacket(Session, Packet);
-  }
-}
-
-const char* ReadSession(WINTUN_SESSION_HANDLE Session, char* Buff) {
-  for (;;) {
-    DWORD PacketSize;
-    BYTE* Packet = WintunReceivePacket(Session, &PacketSize);
-    if (Packet) {
-      std::cerr << "Get buffer" << std::endl;
-      memcpy(Buff, Packet, PacketSize);
-      WintunReleaseReceivePacket(Session, Packet);
-      return nullptr;
-    } else if (GetLastError() == ERROR_NO_MORE_ITEMS) {
-      WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
-    } else {
-      DWORD LastError = GetLastError();
-      std::string err = std::to_string(LastError);
-      std::string msgErr = "Packet read failed, Error code: ";
-      return msgErr.append(err).c_str();
-    }
-  }
-}
-
-void closeSession(WINTUN_ADAPTER_HANDLE Adapter) {
-  WintunCloseAdapter(Adapter);
-}
-
+std::map<std::string, WINTUN_SESSION_HANDLE> Sessions;
+std::map<std::string, WINTUN_ADAPTER_HANDLE> Adapters;
 Napi::Value createInterface(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
   Napi::String interfaceName = info[0].As<Napi::String>();
@@ -91,9 +63,9 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  GUID GUID;
-  CoCreateGuid(&GUID);
-  WINTUN_ADAPTER_HANDLE Adapter = WintunCreateAdapter((LPCWSTR)interfaceName.Utf16Value().c_str(), L"Wintun", &GUID);
+  GUID interfeceGuid;
+  CoCreateGuid(&interfeceGuid);
+  WINTUN_ADAPTER_HANDLE Adapter = WintunCreateAdapter((LPCWSTR)interfaceName.Utf16Value().c_str(), L"Wintun", &interfeceGuid);
   if (!Adapter) {
     int errStatus = GetLastError();
     if (errStatus == 5) Napi::Error::New(env, "Run a administrador user").ThrowAsJavaScriptException();
@@ -126,43 +98,117 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  const Napi::Object funcs = Napi::Object::New(env);
+  char guid_string[37];
+  snprintf(guid_string, sizeof(guid_string), "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", interfeceGuid.Data1, interfeceGuid.Data2, interfeceGuid.Data3, interfeceGuid.Data4[3], interfeceGuid.Data4[4], interfeceGuid.Data4[5], interfeceGuid.Data4[6], interfeceGuid.Data4[7]);
+  std::string guidString = guid_string;
 
-  funcs.Set("deleteInterface", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) -> Napi::Value {
-    const Napi::Env env = info.Env();
-    try {
-      closeSession(Adapter);
-    } catch (const std::string& e) {
-      Napi::Error::New(env, e.c_str()).ThrowAsJavaScriptException();
+  Adapters[guidString] = Adapter;
+  Sessions[guidString] = Session;
+  return Napi::String::New(env, guidString);
+}
+
+Napi::Value getSessions(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), Sessions.size());
+}
+
+class ReadAsync : public Napi::AsyncWorker {
+  private:
+  BYTE* CallbackBuffer;
+  DWORD PacketSize;
+  WINTUN_SESSION_HANDLE Session;
+  public:
+  ReadAsync(const Napi::Function& callback, const Napi::String& sessionGuid) : AsyncWorker(callback), Session(Sessions[sessionGuid.Utf8Value()]) {}
+  ~ReadAsync() {}
+
+  void Execute() override {
+    for (;;) {
+      CallbackBuffer = WintunReceivePacket(Session, &PacketSize);
+      if (CallbackBuffer) {
+        break;
+      } else if (GetLastError() == ERROR_NO_MORE_ITEMS) {
+        WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
+      } else {
+        DWORD LastError = GetLastError();
+        std::string err = std::to_string(LastError);
+        std::string msgErr = "Packet read failed, Error code: ";
+        std::cerr << msgErr.append(err).c_str() << std::endl;
+        SetError(msgErr.append(err));
+        break;
+      }
     }
-    return env.Undefined();
-  }));
+  }
 
-  funcs.Set("Read", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) -> Napi::Value {
+  void OnOK() override {
+    Napi::HandleScope scope(Env());
+    Callback().Call({Env().Null(), Napi::Buffer<BYTE>::New(Env(), CallbackBuffer, PacketSize)});
+    WintunReleaseReceivePacket(Session, CallbackBuffer);
+  }
+
+  void OnError(const Napi::Error& e) override {
+    std::cerr << "Error" << std::endl;
+    Napi::HandleScope scope(Env());
+    const Napi::Value ee = e.Value();
+    Callback().Call({ee, Env().Null()});
+  }
+};
+
+Napi::Value ReadSessionBuffer(const Napi::CallbackInfo& info) {
+  const Napi::String guidString = info[0].ToString();
+  if (Sessions.find(guidString.Utf8Value()) == Sessions.end()) {
     const Napi::Env env = info.Env();
-    try {
-      char* Buff = {};
-      const char* res = ReadSession(Session, Buff);
-      if (!res) return Napi::Buffer<char>::New(env, Buff, sizeof(Buff));
-      Napi::Error::New(env, res).ThrowAsJavaScriptException();
-    } catch (const std::string& e) {
-      Napi::Error::New(env, e.c_str()).ThrowAsJavaScriptException();
-    }
+    Napi::Error::New(env, "Session GUID not exists").ThrowAsJavaScriptException();
     return env.Undefined();
-  }));
+  };
+  ReadAsync* read = new ReadAsync(info[1].As<Napi::Function>(), guidString);
+  read->Queue();
+  return info.Env().Undefined();
+}
 
-  funcs.Set("Write", Napi::Function::New(env, [&](const Napi::CallbackInfo& info) {
-    const Napi::Env env = info.Env();
-    const Napi::Buffer<char> chuck = info[0].As<Napi::Buffer<char>>();
-    WriteSession(Session, chuck.Data(), chuck.ByteLength());
+Napi::Value WriteSessionBuffer(const Napi::CallbackInfo& info) {
+  const Napi::Env env = info.Env();
+  const Napi::String guidString = info[0].ToString();
+  if (Sessions.find(guidString.Utf8Value()) == Sessions.end()) {
+    Napi::Error::New(env, "Session GUID not exists").ThrowAsJavaScriptException();
     return env.Undefined();
-  }));
+  };
+  if (!(info[1].IsObject())) {
+    Napi::Error::New(env, "Arg 1 require Buffer").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  WINTUN_SESSION_HANDLE Session = Sessions[guidString.Utf8Value()];
+  const Napi::Buffer<BYTE> Buffer = info[1].As<Napi::Buffer<BYTE>>();
 
-  return funcs;
+  BYTE* Packet = WintunAllocateSendPacket(Session, Buffer.ByteLength());
+  if (!Packet) {
+    Napi::Error::New(env, "Cannot write Buffer").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  memcpy(Packet, Buffer.Data(), sizeof(Packet));
+  WintunSendPacket(Session, Packet);
+  return env.Undefined();
+}
+
+Napi::Value CloseAdapter(const Napi::CallbackInfo& info) {
+  const Napi::Env env = info.Env();
+  const Napi::String guidString = info[0].ToString();
+  if (Sessions.find(guidString.Utf8Value()) == Sessions.end()) {
+    Napi::Error::New(env, "Session GUID not exists").ThrowAsJavaScriptException();
+    return env.Undefined();
+  };
+  WINTUN_ADAPTER_HANDLE Adapter = Adapters[guidString.Utf8Value()];
+  WintunCloseAdapter(Adapter);
+  Sessions.erase(guidString.Utf8Value());
+  Adapters.erase(guidString.Utf8Value());
+  return env.Undefined();
 }
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  exports.Set("getSessions", Napi::Function::New(env, getSessions));
+  exports.Set("closeAdapter", Napi::Function::New(env, CloseAdapter));
   exports.Set("createInterface", Napi::Function::New(env, createInterface));
+  exports.Set("ReadSessionBuffer", Napi::Function::New(env, ReadSessionBuffer));
+  exports.Set("WriteSessionBuffer", Napi::Function::New(env, WriteSessionBuffer));
   return exports;
 }
 

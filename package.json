@@ -1,5 +1,5 @@
 {
-  "name": "@sirherobrine23/vnot",
+  "name": "node-tap",
   "version": "0.1.0",
   "description": "Network baypass",
   "main": "src/index.js",
