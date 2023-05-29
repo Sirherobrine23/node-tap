@@ -6,7 +6,7 @@ module.exports.Addon = tap;
 
 module.exports.getSessions = getSessions;
 /**
- * 
+ *
  * @returns {string[]}
  */
 function getSessions() {
@@ -40,7 +40,7 @@ module.exports.Tun = class Tun extends stream.Duplex {
     try {
       tap.ReadSessionBuffer(this.fd, (err, buff) => {
         if (err) return this.emit("error", err);
-        return this.push(buff);
+        return this.push(Buffer.from(buff));
       });
     } catch (err) {
       this.emit("error", err);

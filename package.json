@@ -1,7 +1,7 @@
 {
-  "name": "node-tap",
+  "name": "ntap",
   "version": "0.1.0",
-  "description": "Network baypass",
+  "description": "Create TAP Interfaces directly from NodeJS.",
   "main": "src/index.js",
   "type": "module",
   "author": "Matheus Sampaio Queiroga <srherobrine20@gmail.com>",
@@ -16,6 +16,8 @@
     "url": "git+https://github.com/Sirherobrine23/vnot.git"
   },
   "keywords": [
+    "Addon",
+    "wintun",
     "Network",
     "TUN/TAP",
     "TUN",

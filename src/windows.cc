@@ -78,9 +78,16 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  GUID interfeceGuid;
-  CoCreateGuid(&interfeceGuid);
-  WINTUN_ADAPTER_HANDLE Adapter = WintunCreateAdapter((LPCWSTR)interfaceName.Utf16Value().c_str(), L"Wintun", &interfeceGuid);
+  WINTUN_ADAPTER_HANDLE Adapter;
+  Adapter = WintunOpenAdapter((LPCWSTR)interfaceName.Utf16Value().c_str());
+  // End adapter
+  if (Adapter == NULL) {
+    WintunCloseAdapter(Adapter);
+    Adapter = NULL;
+  }
+
+  GUID interfeceGuid; CoCreateGuid(&interfeceGuid);
+  Adapter = WintunCreateAdapter((LPCWSTR)interfaceName.Utf16Value().c_str(), L"Wintun", &interfeceGuid);
   if (!Adapter) {
     int errStatus = GetLastError();
     if (errStatus == 5) Napi::Error::New(env, "Run a administrador user").ThrowAsJavaScriptException();
@@ -139,11 +146,9 @@ class ReadAsync : public Napi::AsyncWorker {
   void Execute() override {
     for (;;) {
       CallbackBuffer = WintunReceivePacket(Session, &PacketSize);
-      if (CallbackBuffer) {
-        break;
-      } else if (GetLastError() == ERROR_NO_MORE_ITEMS) {
-        WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
-      } else {
+      if (CallbackBuffer) break;
+      else if (GetLastError() == ERROR_NO_MORE_ITEMS) WaitForSingleObject(WintunGetReadWaitEvent(Session), INFINITE);
+      else {
         DWORD LastError = GetLastError();
         std::string err = std::to_string(LastError);
         std::string msgErr = "Packet read failed, Error code: ";
@@ -247,8 +252,8 @@ Napi::Value CloseAdapter(const Napi::CallbackInfo& info) {
     Napi::Error::New(env, "Session GUID not exists").ThrowAsJavaScriptException();
     return env.Undefined();
   };
-  WINTUN_ADAPTER_HANDLE Adapter = Adapters[guidString.Utf8Value()];
-  WintunCloseAdapter(Adapter);
+  WintunEndSession(Sessions[guidString.Utf8Value()]);
+  WintunCloseAdapter(Adapters[guidString.Utf8Value()]);
   Sessions.erase(guidString.Utf8Value());
   Adapters.erase(guidString.Utf8Value());
   return env.Undefined();
