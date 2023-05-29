@@ -5,8 +5,12 @@ const path = require("path");
 module.exports.Addon = tap;
 
 module.exports.getSessions = getSessions;
+/**
+ * 
+ * @returns {string[]}
+ */
 function getSessions() {
-  return Number(tap.getSessions());
+  return tap.getSessions();
 }
 
 module.exports.Tun = class Tun extends stream.Duplex {
@@ -25,8 +29,7 @@ module.exports.Tun = class Tun extends stream.Duplex {
 
   _write(chuck, encoding, callback) {
     try {
-      tap.WriteSessionBuffer(this.fd, Buffer.from(chuck, encoding));
-      callback();
+      tap.WriteSessionBuffer(this.fd, Buffer.from(chuck, encoding), callback);
     } catch (err) {
       callback(err);
     }

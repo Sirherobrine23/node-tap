@@ -48,16 +48,31 @@ static HMODULE InitializeWintun(LPCWSTR location = L"wintun.dll") {
   return Wintun;
 }
 
+std::string GuidToString(const GUID& interfeceGuid) {
+  // char guid_string[37];
+  // snprintf(guid_string, sizeof(guid_string), "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", interfeceGuid.Data1, interfeceGuid.Data2, interfeceGuid.Data3, interfeceGuid.Data4[3], interfeceGuid.Data4[4], interfeceGuid.Data4[5], interfeceGuid.Data4[6], interfeceGuid.Data4[7]);
+  // return guid_string;
+
+  std::string nGuidString = std::to_string(interfeceGuid.Data1);
+  nGuidString = nGuidString.append("-").append(std::to_string(interfeceGuid.Data2)).append("-").append(std::to_string(interfeceGuid.Data3)).append("-");
+  nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[3]));
+  nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[4]));
+  nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[5]));
+  nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[6]));
+  nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[7]));
+  return nGuidString;
+}
+
 std::map<std::string, WINTUN_SESSION_HANDLE> Sessions;
 std::map<std::string, WINTUN_ADAPTER_HANDLE> Adapters;
+
 Napi::Value createInterface(const Napi::CallbackInfo& info) {
   const Napi::Env env = info.Env();
   Napi::String interfaceName = info[0].As<Napi::String>();
   if (interfaceName.IsUndefined()) interfaceName = Napi::String::New(env, "nodetun");
   Napi::Object options = info[1].ToObject();
-  Napi::String dllLocation = options.Get("dll").ToString();
 
-  HMODULE Wintun = InitializeWintun((LPCWSTR)dllLocation.Utf16Value().c_str());
+  HMODULE Wintun = InitializeWintun((LPCWSTR)options.Get("dll").ToString().Utf16Value().c_str());
   if (!Wintun) {
     Napi::Error::New(env, "Cannot Initialize Wintun, check dll location").ThrowAsJavaScriptException();
     return env.Undefined();
@@ -84,6 +99,7 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
   AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (6 << 16) | (7 << 8) | (7 << 0)); /* 10.6.7.7 */
   AddressRow.OnLinkPrefixLength = 24; /* This is a /24 network */
   AddressRow.DadState = IpDadStatePreferred;
+
   DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
   if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS) {
     WintunCloseAdapter(Adapter);
@@ -98,17 +114,17 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  char guid_string[37];
-  snprintf(guid_string, sizeof(guid_string), "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", interfeceGuid.Data1, interfeceGuid.Data2, interfeceGuid.Data3, interfeceGuid.Data4[3], interfeceGuid.Data4[4], interfeceGuid.Data4[5], interfeceGuid.Data4[6], interfeceGuid.Data4[7]);
-  std::string guidString = guid_string;
-
-  Adapters[guidString] = Adapter;
+  std::string guidString;
+  Adapters[(guidString = GuidToString(interfeceGuid))] = Adapter;
   Sessions[guidString] = Session;
   return Napi::String::New(env, guidString);
 }
 
 Napi::Value getSessions(const Napi::CallbackInfo& info) {
-  return Napi::Number::New(info.Env(), Sessions.size());
+  const Napi::Env env = info.Env();
+  const Napi::Array napiSessions = Napi::Array::New(env);
+  for (std::map<std::string, WINTUN_SESSION_HANDLE>::iterator it = Sessions.begin(); it != Sessions.end(); ++it) napiSessions.Set(napiSessions.Length(), Napi::String::New(env, it->first));
+  return napiSessions;
 }
 
 class ReadAsync : public Napi::AsyncWorker {
@@ -164,9 +180,48 @@ Napi::Value ReadSessionBuffer(const Napi::CallbackInfo& info) {
   return info.Env().Undefined();
 }
 
+class WriteAsync : public Napi::AsyncWorker {
+  private:
+  WINTUN_SESSION_HANDLE Session;
+  DWORD PacketSize;
+  BYTE* Data;
+
+  public:
+  WriteAsync(const Napi::Function& callback, const Napi::String& sessionGuid, const Napi::Buffer<BYTE> Buff) :
+    AsyncWorker(callback),
+    Session(Sessions[sessionGuid.Utf8Value()]),
+    PacketSize(Buff.ByteLength()),
+    Data(Buff.Data())
+  {}
+  ~WriteAsync() {}
+
+  void Execute() override {
+    BYTE* Packet = WintunAllocateSendPacket(Session, PacketSize);
+    if (!Packet) {
+      SetError("Cannot write Buffer");
+      return;
+    }
+
+    memcpy(Packet, Data, PacketSize);
+    WintunSendPacket(Session, Packet);
+  }
+
+  void OnOK() override {
+    Napi::HandleScope scope(Env());
+    Callback().Call({Env().Null()});
+  }
+
+  void OnError(const Napi::Error& e) override {
+    std::cerr << "Error" << std::endl;
+    Napi::HandleScope scope(Env());
+    const Napi::Value ee = e.Value();
+    Callback().Call({ee, Env().Null()});
+  }
+};
+
 Napi::Value WriteSessionBuffer(const Napi::CallbackInfo& info) {
-  const Napi::Env env = info.Env();
   const Napi::String guidString = info[0].ToString();
+  const Napi::Env env = info.Env();
   if (Sessions.find(guidString.Utf8Value()) == Sessions.end()) {
     Napi::Error::New(env, "Session GUID not exists").ThrowAsJavaScriptException();
     return env.Undefined();
@@ -175,17 +230,13 @@ Napi::Value WriteSessionBuffer(const Napi::CallbackInfo& info) {
     Napi::Error::New(env, "Arg 1 require Buffer").ThrowAsJavaScriptException();
     return env.Undefined();
   }
-  WINTUN_SESSION_HANDLE Session = Sessions[guidString.Utf8Value()];
-  const Napi::Buffer<BYTE> Buffer = info[1].As<Napi::Buffer<BYTE>>();
-
-  BYTE* Packet = WintunAllocateSendPacket(Session, Buffer.ByteLength());
-  if (!Packet) {
-    Napi::Error::New(env, "Cannot write Buffer").ThrowAsJavaScriptException();
+  if (!(info[2].IsFunction())) {
+    Napi::Error::New(env, "Arg 2 require Callback").ThrowAsJavaScriptException();
     return env.Undefined();
   }
 
-  memcpy(Packet, Buffer.Data(), sizeof(Packet));
-  WintunSendPacket(Session, Packet);
+  WriteAsync* Write = new WriteAsync(info[2].As<Napi::Function>(), guidString, info[1].As<Napi::Buffer<BYTE>>());
+  Write->Queue();
   return env.Undefined();
 }
 
