@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ws2tcpip.h>
 #include <combaseapi.h>
 #include "wintun.h"
 
@@ -49,10 +50,6 @@ static HMODULE InitializeWintun(LPCWSTR location = L"wintun.dll") {
 }
 
 std::string GuidToString(const GUID& interfeceGuid) {
-  // char guid_string[37];
-  // snprintf(guid_string, sizeof(guid_string), "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", interfeceGuid.Data1, interfeceGuid.Data2, interfeceGuid.Data3, interfeceGuid.Data4[3], interfeceGuid.Data4[4], interfeceGuid.Data4[5], interfeceGuid.Data4[6], interfeceGuid.Data4[7]);
-  // return guid_string;
-
   std::string nGuidString = std::to_string(interfeceGuid.Data1);
   nGuidString = nGuidString.append("-").append(std::to_string(interfeceGuid.Data2)).append("-").append(std::to_string(interfeceGuid.Data3)).append("-");
   nGuidString = nGuidString.append(std::to_string(interfeceGuid.Data4[3]));
@@ -78,9 +75,8 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  WINTUN_ADAPTER_HANDLE Adapter;
-  Adapter = WintunOpenAdapter((LPCWSTR)interfaceName.Utf16Value().c_str());
   // End adapter
+  WINTUN_ADAPTER_HANDLE Adapter = WintunOpenAdapter((LPCWSTR)interfaceName.Utf16Value().c_str());
   if (Adapter == NULL) {
     WintunCloseAdapter(Adapter);
     Adapter = NULL;
@@ -99,19 +95,48 @@ Napi::Value createInterface(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  MIB_UNICASTIPADDRESS_ROW AddressRow;
-  InitializeUnicastIpAddressEntry(&AddressRow);
-  WintunGetAdapterLUID(Adapter, &AddressRow.InterfaceLuid);
-  AddressRow.Address.Ipv4.sin_family = AF_INET;
-  AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (6 << 16) | (7 << 8) | (7 << 0)); /* 10.6.7.7 */
-  AddressRow.OnLinkPrefixLength = 24; /* This is a /24 network */
-  AddressRow.DadState = IpDadStatePreferred;
+  /* IPv4 config */
+  if (options.Get("IPv4").IsObject()) {
+    MIB_UNICASTIPADDRESS_ROW AddressRow;
+    InitializeUnicastIpAddressEntry(&AddressRow);
+    WintunGetAdapterLUID(Adapter, &AddressRow.InterfaceLuid);
+    AddressRow.DadState = IpDadStatePreferred;
 
-  DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
-  if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS) {
-    WintunCloseAdapter(Adapter);
-    Napi::Error::New(env, "Failed to set IP address").ThrowAsJavaScriptException();
-    return env.Undefined();
+    AddressRow.Address.Ipv4.sin_family = AF_INET;
+    const Napi::Object IPv4Config = options.Get("IPv4").ToObject();
+    AddressRow.OnLinkPrefixLength = IPv4Config.Get("mask").ToNumber().Int32Value();
+    // AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = inet_addr(IPv4Config.Get("IP").ToString().Utf8Value().c_str());
+    inet_pton(AF_INET, IPv4Config.Get("IP").ToString().Utf8Value().c_str(), &AddressRow.Address.Ipv4.sin_addr);
+
+    DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
+    if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS) {
+      WintunCloseAdapter(Adapter);
+      std::string msgErr = "Failed to set IPs address, Error code: ";
+      std::string err = std::to_string(LastError);
+      Napi::Error::New(env, msgErr.append(err).c_str()).ThrowAsJavaScriptException();
+      return env.Undefined();
+    }
+  }
+
+  /* IPv6 config */
+  if (options.Get("IPv6").IsObject()) {
+    MIB_UNICASTIPADDRESS_ROW AddressRow;
+    InitializeUnicastIpAddressEntry(&AddressRow);
+    WintunGetAdapterLUID(Adapter, &AddressRow.InterfaceLuid);
+    AddressRow.DadState = IpDadStatePreferred;
+
+    const Napi::Object IPv6Config = options.Get("IPv6").ToObject();
+    AddressRow.Address.Ipv6.sin6_family = AF_INET6;
+    inet_pton(AF_INET6, IPv6Config.Get("IP").ToString().Utf8Value().c_str(), &AddressRow.Address.Ipv6.sin6_addr);
+
+    DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
+    if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS) {
+      WintunCloseAdapter(Adapter);
+      std::string msgErr = "Failed to set IPs address, Error code: ";
+      std::string err = std::to_string(LastError);
+      Napi::Error::New(env, msgErr.append(err).c_str()).ThrowAsJavaScriptException();
+      return env.Undefined();
+    }
   }
 
   WINTUN_SESSION_HANDLE Session = WintunStartSession(Adapter, 0x400000);
@@ -202,13 +227,16 @@ class WriteAsync : public Napi::AsyncWorker {
 
   void Execute() override {
     BYTE* Packet = WintunAllocateSendPacket(Session, PacketSize);
-    if (!Packet) {
-      SetError("Cannot write Buffer");
+    if (Packet) {
+      memcpy(Packet, Data, PacketSize);
+      WintunSendPacket(Session, Packet);
       return;
     }
 
-    memcpy(Packet, Data, PacketSize);
-    WintunSendPacket(Session, Packet);
+    DWORD lastErr = GetLastError();
+    std::string errMsg = "Cannot write Buffer, Error code: ";
+    SetError(errMsg.append((char*)lastErr));
+    return;
   }
 
   void OnOK() override {
@@ -259,7 +287,58 @@ Napi::Value CloseAdapter(const Napi::CallbackInfo& info) {
   return env.Undefined();
 }
 
+std::string wcharToString(WCHAR *txt) {
+  std::wstring ws(txt);
+  std::string str(ws.begin(), ws.end());
+  return str;
+}
+
+Napi::Value parseFrame(const Napi::CallbackInfo& info) {
+  const Napi::Env env = info.Env();
+  const Napi::Buffer<BYTE> __data = info[0].As<Napi::Buffer<BYTE>>();
+  if (__data.IsEmpty() || __data.IsUndefined()) {
+    Napi::Error::New(env, "Set buffer frame!").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  DWORD PacketSize = __data.ByteLength();
+  if (PacketSize < 20) {
+    Napi::Error::New(env, "Received packet without room for an IP header").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  const Napi::Object packetInfo = Napi::Object::New(env);
+  BYTE *Packet = __data.Data(), IpVersion = Packet[0] >> 4, Proto;
+  WCHAR Src[46], Dst[46];
+
+  if (IpVersion == 4) {
+    packetInfo.Set("version", "IPv4");
+    RtlIpv4AddressToStringW((struct in_addr *)&Packet[12], Src);
+    RtlIpv4AddressToStringW((struct in_addr *)&Packet[16], Dst);
+    Proto = Packet[9];
+    Packet += 20, PacketSize -= 20;
+  } else if (IpVersion == 6 && PacketSize > 40) {
+    packetInfo.Set("version", "IPv6");
+    RtlIpv6AddressToStringW((struct in_addr6 *)&Packet[8], Src);
+    RtlIpv6AddressToStringW((struct in_addr6 *)&Packet[24], Dst);
+    Proto = Packet[6];
+    Packet += 40, PacketSize -= 40;
+  } else {
+    Napi::Error::New(env, "Cannot parse frame!").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  packetInfo.Set("proto", Napi::Number::New(env, Proto));
+  packetInfo.Set("src", Napi::String::New(env, wcharToString(Src)));
+  packetInfo.Set("dst", Napi::String::New(env, wcharToString(Dst)));
+  if (Proto == 1 && PacketSize >= 8 && Packet[0] == 0) {
+    packetInfo.Set("proto", "ICMP");
+  }
+
+  return packetInfo;
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  exports.Set("parseFrame", Napi::Function::New(env, parseFrame));
   exports.Set("getSessions", Napi::Function::New(env, getSessions));
   exports.Set("closeAdapter", Napi::Function::New(env, CloseAdapter));
   exports.Set("createInterface", Napi::Function::New(env, createInterface));

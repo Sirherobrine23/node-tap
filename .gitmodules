@@ -1,3 +1,3 @@
-[submodule "src/dep/win/wintun"]
-	path = src/dep/win/wintun
+[submodule "addon/dep/win/wintun"]
+	path = addon/dep/win/wintun
 	url = https://github.com/WireGuard/wintun.git

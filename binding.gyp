@@ -13,19 +13,20 @@
       "conditions": [
         ["OS=='win'", {
           "include_dirs": [
-            "src/dep/win/wintun/api"
+            "addon/dep/win/wintun/api"
           ],
           "sources": [
-            "src/windows.cc"
+            "addon/windows.cc"
           ],
           "libraries": [
             "ws2_32.lib",
+            "ntdll.lib",
             "iphlpapi.lib"
           ]
         }],
         ["OS=='linux'", {
           "sources": [
-            "src/linux.cc"
+            "addon/linux.cc"
           ]
         }],
       ]

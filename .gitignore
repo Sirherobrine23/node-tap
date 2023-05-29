@@ -5,9 +5,15 @@
 node_modules/
 /*-lock*
 
+# Typescript
+*.tsbuildinfo
+
 # TAP Build
+addon/dep/win/wintun
 /build/
 /*.dll
 
 # Debug
-/*.log
+/*.tun*
+*.bin
+*.log
