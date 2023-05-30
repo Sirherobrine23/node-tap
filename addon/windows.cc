@@ -263,11 +263,15 @@ Napi::Value WriteSessionBuffer(const Napi::CallbackInfo& info) {
     Napi::Error::New(env, "Arg 1 require Buffer").ThrowAsJavaScriptException();
     return env.Undefined();
   }
+  /* Check Buffer size */
+  if (info[1].As<Napi::Buffer<BYTE>>().ByteLength() > WINTUN_MAX_IP_PACKET_SIZE) {
+    Napi::Error::New(env, "Data ir large").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
   if (!(info[2].IsFunction())) {
     Napi::Error::New(env, "Arg 2 require Callback").ThrowAsJavaScriptException();
     return env.Undefined();
   }
-
   WriteAsync* Write = new WriteAsync(info[2].As<Napi::Function>(), guidString, info[1].As<Napi::Buffer<BYTE>>());
   Write->Queue();
   return env.Undefined();
